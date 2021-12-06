@@ -6,7 +6,7 @@ all: createbucket preparedataset copydataset createproject insertdatasetinprojec
 
 createbucket:
 	s3artifact=$(echo "$s3artifact" | tr '[:upper:]' '[:lower:]') 
-	aws s3 mb s3://$(s3artifact)
+	aws s3 mb s3://$s3artifact
 
 preparedataset:
 	sed -i '' 's/bucket_name/$s3artifact/g' dataset-labelled/output.manifest
