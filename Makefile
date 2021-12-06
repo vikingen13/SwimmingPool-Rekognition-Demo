@@ -5,14 +5,14 @@ testDS = aws rekognition describe-projects --project-names SwimmingPoolProject -
 all: createbucket preparedataset copydataset createproject insertdatasetinproject wait-dataset-creation distributedatasets wait-dataset-distribution trainmodel deploy-site
 
 createbucket:
-	s3artifact=$(echo "$s3artifact" | tr '[:upper:]' '[:lower:]') 
-	aws s3 mb s3://$s3artifact
+		s3artifact=$(echo "$s3artifact" | tr '[:upper:]' '[:lower:]')
+		aws s3 mb s3://"$s3artifact"
 
 preparedataset:
-	sed -i '' 's/bucket_name/$s3artifact/g' dataset-labelled/output.manifest
+	sed -i '' 's/bucket_name/"$s3artifact"/g' dataset-labelled/output.manifest
 
 copydataset:
-	aws s3 sync dataset-labelled/ s3://$s3artifact/dataset-labelled
+	aws s3 sync dataset-labelled/ s3://"$s3artifact"/dataset-labelled
 
 createproject:
 	aws cloudformation deploy --template-file main.yaml --stack-name swimmingPoolRekognition --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
@@ -20,7 +20,7 @@ createproject:
 insertdatasetinproject:
 	aws rekognition create-dataset --project-arn $$($(projectArn)) \
   		--dataset-type TRAIN \
-  		--dataset-source '{ "GroundTruthManifest": { "S3Object": { "Bucket": "$(s3artifact)", "Name": "dataset-labelled/output.manifest" } } }' \
+  		--dataset-source '{ "GroundTruthManifest": { "S3Object": { "Bucket": ""$s3artifact"", "Name": "dataset-labelled/output.manifest" } } }' \
 		--query "DatasetArn" --output text
 
 	aws rekognition create-dataset --project-arn $$($(projectArn)) \
@@ -43,7 +43,8 @@ trainmodel:
 	aws rekognition create-project-version\
                             --project-arn $$($(projectArn)) \
                             --version-name "v1"\
-                            --output-config '{"S3Bucket":"$s3artifact", "S3KeyPrefix":"output_folder"}'
+                            --output-config '{"S3Bucket":""$s3artifact"", "S3KeyPrefix":"output_folder"}'
 
 deploy-site:
 	aws cloudformation deploy --template-file WebSite.yaml --stack-name websiteRekognition --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides AdminEmail=$(email)
+
