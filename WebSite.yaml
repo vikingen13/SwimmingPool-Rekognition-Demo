@@ -1,0 +1,290 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon Rekognition Custom Labels Demo
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Runtime: nodejs12.x
+    MemorySize: 128
+    Timeout: 60
+    Environment:
+      Variables:
+        COGNITO_IDENTITY_POOL:
+          Ref: CognitoIdentityPool
+        COGNITO_USER_POOL_ID:
+          Ref: CognitoUserPool
+        COGNITO_USER_POOL_CLIENT_ID:
+          Ref: CognitoUserPoolClient
+        FROM_BUCKET:
+          Fn::Sub: solution-builders-${AWS::Region}
+        CREATE_CLOUDFRONT_DISTRIBUTION:
+          Ref: CreateCloudFrontDistribution
+        REGION:
+          Ref: AWS::Region
+        TO_BUCKET:
+          Ref: WebUIBucket
+        VERSION: '1.3'
+Parameters:
+  AdminEmail:
+    Description: Creates a username to be used for Authentication. It needs to be
+      an e-mail address.
+    Type: String
+    AllowedPattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+  ResourcePrefix:
+    Description: AWS Resources are named based on the value of this parameter. You
+      must customise this if you are launching more than one instance of the stack
+      within the same account.
+    Type: String
+    Default: RekogCustomLabelsDemo
+    AllowedPattern: ^[a-zA-Z0-9_]*$
+  CreateCloudFrontDistribution:
+    Description: Creates a CloudFront distribution for accessing the web interface
+      of the demo. This must be enabled if S3 Block Public Access is enabled at an
+      account level.
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+Conditions:
+  WithCloudFront:
+    Fn::Equals:
+    - Ref: CreateCloudFrontDistribution
+    - 'true'
+Outputs:
+  url:
+    Value:
+      Fn::If:
+      - WithCloudFront
+      - Fn::Sub: https://${CloudFrontDistribution.DomainName}
+      - Fn::Sub: https://${WebUIBucket.RegionalDomainName}/index.html
+    Description: Amazon Rekognition Custom Labels Demo Url
+Resources:
+  SetupWebUI:
+    Type: Custom::Setup
+    Properties:
+      ServiceToken:
+        Fn::GetAtt:
+        - LambdaSetup
+        - Arn
+      Region:
+        Ref: AWS::Region
+  WebUIBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          AllowedOrigins:
+          - '*'
+          Id:
+            Fn::Sub: ${ResourcePrefix}RekogCorsRule
+          MaxAge: 3600
+  WebUIBucketReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: WithCloudFront
+    Properties:
+      Bucket:
+        Ref: WebUIBucket
+      PolicyDocument:
+        Statement:
+        - Action: s3:GetObject
+          Effect: Allow
+          Resource:
+            Fn::Sub: arn:aws:s3:::${WebUIBucket}/*
+          Principal:
+            CanonicalUser:
+              Fn::GetAtt:
+              - CloudFrontOriginAccessIdentity
+              - S3CanonicalUserId
+  CognitoIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName:
+        Fn::Sub: ${ResourcePrefix}RekogIdentityPool
+      CognitoIdentityProviders:
+      - ClientId:
+          Ref: CognitoUserPoolClient
+        ProviderName:
+          Fn::GetAtt:
+          - CognitoUserPool
+          - ProviderName
+      AllowUnauthenticatedIdentities: false
+  CognitoIdentityPoolRole:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId:
+        Ref: CognitoIdentityPool
+      Roles:
+        authenticated:
+          Fn::GetAtt:
+          - RekognitionInvokeRole
+          - Arn
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${ResourcePrefix}RekogUsersPool
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailMessage: Your Amazon Rekognition Custom Labels Demo username is {username}
+            and the temporary password is {####}
+          EmailSubject: Your temporary password for Amazon Rekognition Custom Labels
+            Demo
+          SMSMessage: Your Amazon Rekognition Custom Labels Demo username is {username}
+            and the temporary password is {####}
+      AutoVerifiedAttributes:
+      - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId:
+        Ref: CognitoUserPool
+      ClientName:
+        Fn::Sub: ${ResourcePrefix}RekogUsersPoolClient
+      GenerateSecret: false
+      RefreshTokenValidity: 30
+  CognitoUserPoolUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      Username:
+        Ref: AdminEmail
+      UserPoolId:
+        Ref: CognitoUserPool
+      DesiredDeliveryMediums:
+      - EMAIL
+      UserAttributes:
+      - Name: email
+        Value:
+          Ref: AdminEmail
+      - Name: email_verified
+        Value: 'true'
+  RekognitionInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Federated:
+            - cognito-identity.amazonaws.com
+          Action:
+          - sts:AssumeRole
+          - sts:AssumeRoleWithWebIdentity
+          Condition:
+            StringEquals:
+              cognito-identity.amazonaws.com:aud:
+                Ref: CognitoIdentityPool
+      Policies:
+      - PolicyName: RekogCustomLabelsDemo-RekogInvoke
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - rekognition:DetectCustomLabels
+            - rekognition:DescribeProjectVersions
+            - rekognition:StopProjectVersion
+            - rekognition:StartProjectVersion
+            - rekognition:DescribeProjects
+            Resource: '*'
+  CustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: RekogCustomLabelsDemo-setup-S3-fc
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:DeleteObject
+            - s3:ListBucket
+            - s3:PutObject
+            - s3:PutObjectAcl
+            Resource:
+            - Fn::GetAtt:
+              - WebUIBucket
+              - Arn
+            - Fn::Sub: ${WebUIBucket.Arn}/*
+          - Effect: Allow
+            Action: s3:GetObject
+            Resource:
+              Fn::Sub: arn:aws:s3:::solution-builders-${AWS::Region}/*
+      - PolicyName: RekogCustomLabelsDemo-cloudwatch-logs
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: logs:*
+            Resource: arn:aws:logs:*:*:*
+  LambdaSetup:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${ResourcePrefix}RekogCustomLabelsDemoSetup
+      Handler: index.handler
+      CodeUri: s3://solution-builders-eu-west-1/amazon-rekognition-custom-labels-demo/v1.3/606da13ba169ab4085304800fd439f9a
+      Description: Custom Lambda resource for the Amazon Rekognition Custom Labels
+        Demo Cloudformation Stack
+      Role:
+        Fn::GetAtt:
+        - CustomResourceRole
+        - Arn
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Condition: WithCloudFront
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment:
+          Ref: WebUIBucket
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: WithCloudFront
+    Properties:
+      DistributionConfig:
+        Origins:
+        - DomainName:
+            Fn::GetAtt:
+            - WebUIBucket
+            - RegionalDomainName
+          Id:
+            Fn::Sub: ${ResourcePrefix}-myS3Origin
+          S3OriginConfig:
+            OriginAccessIdentity:
+              Fn::Sub: origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}
+        Enabled: true
+        HttpVersion: http2
+        Comment: The Distribution for the Rekognition Custom Label Demo
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - HEAD
+          - GET
+          - OPTIONS
+          TargetOriginId:
+            Fn::Sub: ${ResourcePrefix}-myS3Origin
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true

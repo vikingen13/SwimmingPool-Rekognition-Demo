@@ -1,0 +1,17 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Script to create a rekognition project ready to be trained
+
+###############################################################################
+Resources:
+###############################################################################
+
+  SwimmingPoolProject:
+    Type: AWS::Rekognition::Project
+    Properties: 
+      ProjectName: "SwimmingPoolProject"
+
+Outputs:
+
+  ProjectArn:
+    Value: !GetAtt SwimmingPoolProject.Arn
