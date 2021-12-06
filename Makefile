@@ -2,7 +2,7 @@ projectArn = aws rekognition describe-projects --project-names SwimmingPoolProje
 trainDS = aws rekognition describe-projects --project-names SwimmingPoolProject --query "ProjectDescriptions[0].Datasets[?DatasetType=='TRAIN'].DatasetArn" --output text
 testDS = aws rekognition describe-projects --project-names SwimmingPoolProject --query "ProjectDescriptions[0].Datasets[?DatasetType=='TEST'].DatasetArn" --output text
 
-all: createbucket preparedataset copydataset createproject insertdatasetinproject wait distributedatasets wait trainmodel deploy-site
+all: createbucket preparedataset copydataset createproject insertdatasetinproject wait-dataset-creation distributedatasets wait-dataset-distribution trainmodel deploy-site
 
 createbucket:
 	aws s3 mb s3://$(s3artifact)
@@ -26,9 +26,14 @@ insertdatasetinproject:
   		--dataset-type TEST \
 		--query "DatasetArn" --output text
 
-wait:
-	echo "we stop for 60s to wait for dataset creation/distribution"
+wait-dataset-creation:
+	echo "we stop for 60s to wait for dataset creation"
 	sleep 60
+
+wait-dataset-distribution:
+	echo "we stop for 60s to wait for dataset distribution"
+	sleep 60
+
 
 distributedatasets:	
 	eval aws rekognition distribute-dataset-entries --datasets [\'{\"Arn\": \"$$($(trainDS))\"}, {\"Arn\": \"$$($(testDS))\"}\']
